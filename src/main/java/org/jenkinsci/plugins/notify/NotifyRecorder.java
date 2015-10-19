@@ -11,6 +11,7 @@ import hudson.Extension;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
+import hudson.model.Action;
 import hudson.model.BuildListener;
 import hudson.model.Result;
 import hudson.tasks.BuildStepDescriptor;
@@ -18,6 +19,7 @@ import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Publisher;
 import hudson.tasks.Recorder;
 import hudson.util.FormValidation;
+import hudson.util.ReflectionUtils;
 import hudson.util.ListBoxModel;
 import hudson.util.ListBoxModel.Option;
 import jenkins.model.Jenkins;
@@ -26,9 +28,11 @@ import org.apache.http.Consts;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.Asserts;
 import org.apache.http.util.EntityUtils;
@@ -40,11 +44,18 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 
 public class NotifyRecorder extends Recorder
@@ -52,7 +63,6 @@ public class NotifyRecorder extends Recorder
     private static final int        CONNECT_TIMEOUT         = 10000;
     private static final int        CONNECT_REQUEST_TIMEOUT = 10000;
     private static final int        SOCKET_TIMEOUT          = 10000;
-    private static final HttpClient HTTP_CLIENT             = buildHttpClient();
     private static final String     JSON_FUNCTION           = loadResource( "/json.groovy" );
     private static final String     DEFAULT_TEMPLATE        = loadResource( "/default-template.json"  );
     private static final String     LINE                    = "\n---------------\n";
@@ -62,8 +72,7 @@ public class NotifyRecorder extends Recorder
     @Nonnull  public  final     String        notifyTemplate;
     @Nonnull  private transient BuildListener listener;
 
-
-    private static HttpClient buildHttpClient () {
+    private CloseableHttpClient buildHttpClient () {
         RequestConfig requestConfig = RequestConfig.custom().
                                       setConnectTimeout( CONNECT_TIMEOUT ).
                                       setSocketTimeout( SOCKET_TIMEOUT ).
@@ -137,7 +146,53 @@ public class NotifyRecorder extends Recorder
         return true;
     }
 
-
+    /**
+     * Determines the possible failure reasons of given build based on results of "Build Failure Analyzer" plugin.
+     * Returned collection will contain instances of com.sonyericsson.jenkins.plugins.bfa.FoundFailureCause .
+     * @param build the build to get the failure reasons from
+     * @return set of failure reasons
+     */
+    private Collection<Object> buildPossibleFailureCauses(final AbstractBuild build)
+    {
+    	Map<String,Object> reasons=new LinkedHashMap<String,Object>();
+    	if(Result.SUCCESS!=build.getResult()){
+    		listener.getLogger().println( String.format( "Searching for build failure reasons" ));
+	    	for(Action action:build.getAllActions()){
+	    		try{
+		    		if(action.getClass().getSimpleName().equals("FailureCauseBuildAction")){
+		    			listener.getLogger().println( String.format( "Found build action '%s'", action.getDisplayName() ));
+		    			Method  method=ReflectionUtils.findMethod(action.getClass(), "getFoundFailureCauses");
+		    			Object failureCausesObject=method.invoke(action, new Object[]{});
+		    			if(failureCausesObject instanceof List){
+		    				List<Object> failureCauses=(List) failureCausesObject;
+		    				for(Object failureCause:failureCauses){
+		    					Method  nameMethod=ReflectionUtils.findMethod(failureCause.getClass(), "getName");
+		    					Object nameObject=nameMethod.invoke(failureCause, new Object[]{});
+		    					listener.getLogger().println( String.format( "Found failure cause '%s'", nameObject ));
+		    					if(nameObject instanceof String){
+		    						reasons.put((String) nameObject,failureCause);
+		    					}
+		    				}
+		    			}
+		    		}
+	    		}catch(InvocationTargetException e){
+	    			listener.getLogger().println( String.format( "Error while determing possible failure causes %s", e.getMessage() ));
+	    		}catch(IllegalAccessException e){
+	    			listener.getLogger().println( String.format( "Error while determing possible failure causes %s", e.getMessage() ));
+	    		}
+	    	}
+    	}
+    	return reasons.values();
+    }
+    
+    /*
+     * Assures that the push happens at the end, mainly after the build failure analyzer was running already
+     */
+    @Override
+    public boolean needsToRunAfterFinalized() {
+        return true;
+    }
+    
     private String buildNotifyJson( @Nonnull final AbstractBuild build,
                                     @Nonnull final Map<String,?> env )
     {
@@ -145,6 +200,7 @@ public class NotifyRecorder extends Recorder
            put( "jenkins", notNull( Jenkins.getInstance(), "Jenkins instance" ));
            put( "build",   notNull( build, "Build instance" ));
            put( "env",     notNull( env, "Build environment" ));
+           put( "reasons", notNull( buildPossibleFailureCauses(build), "Possible Failure Causes collected by 'Build Failure Analyzer' plugin" ));
         }};
 
         String json     = null;
@@ -176,27 +232,32 @@ public class NotifyRecorder extends Recorder
     }
 
 
-    private void sendNotifyRequest( @Nonnull String url, @Nonnull String json )
-        throws IOException
-    {
-        try
-        {
-            HttpPost request = new HttpPost( notBlank( url, "Notify URL" ));
-            request.setEntity( new StringEntity( notBlank( json, "Notify JSON" ),
-                                                 ContentType.create( "application/json", Consts.UTF_8 )));
-            HttpResponse response   = HTTP_CLIENT.execute( request );
-            int          statusCode = response.getStatusLine().getStatusCode();
-
-            Asserts.check( statusCode == 200, String.format( "status code is %s, expected 200", statusCode ));
-            EntityUtils.consumeQuietly( notNull( response.getEntity(), "Response entity" ));
-            request.releaseConnection();
-        }
-        catch ( Exception e )
-        {
-            throwError( String.format( "Failed to publish notify request to '%s', payload JSON was:%s%s%s",
-                                       notifyUrl, LINE, json, LINE ), e );
-        }
-    }
+	private void sendNotifyRequest(@Nonnull String url, @Nonnull String json)
+			throws IOException {
+		CloseableHttpClient httpclient = buildHttpClient();
+		try {
+			HttpPost request = new HttpPost(notBlank(url, "Notify URL"));
+			request.setEntity(new StringEntity(notBlank(json, "Notify JSON"),
+					ContentType.create("application/json", Consts.UTF_8)));
+			CloseableHttpResponse response = httpclient.execute(request);
+			try {
+				int statusCode = response.getStatusLine().getStatusCode();
+				Asserts.check(statusCode == 200, String.format(
+						"status code is %s, expected 200", statusCode));
+				EntityUtils.consume(notNull(response.getEntity(),
+						"Response entity"));
+			} finally {
+				response.close();
+			}
+		} catch (Exception e) {
+			throwError(
+					String.format(
+							"Failed to publish notify request to '%s', payload JSON was:%s%s%s",
+							notifyUrl, LINE, json, LINE), e);
+		} finally {
+			httpclient.close();
+		}
+	}
 
 
     private void throwError( String message, Exception e ) {
