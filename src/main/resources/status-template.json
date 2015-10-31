@@ -1,0 +1,14 @@
+component[status]=${
+    (
+      !build.previousBuild.result.equals(hudson.model.Result.SUCCESS) && build.result.equals(hudson.model.Result.SUCCESS)
+    )
+    ? "operational" :
+    (
+      (
+        (
+          !build.previousBuild.result.equals(hudson.model.Result.SUCCESS) && !build.result.equals(hudson.model.Result.SUCCESS)
+        )
+        ? "major_outage" : "operational"
+      )
+    )
+}

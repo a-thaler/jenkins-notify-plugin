@@ -24,16 +24,25 @@ import hudson.util.ListBoxModel;
 import hudson.util.ListBoxModel.Option;
 import jenkins.model.Jenkins;
 
+import org.apache.commons.httpclient.NameValuePair;
+import org.apache.commons.httpclient.methods.multipart.MultipartRequestEntity;
+import org.apache.commons.httpclient.methods.multipart.Part;
+import org.apache.commons.httpclient.methods.multipart.StringPart;
+import org.apache.commons.httpclient.params.HttpMethodParams;
 import org.apache.http.Consts;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
+import org.apache.http.HttpEntity;
 import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.entity.EntityBuilder;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
+import org.apache.http.client.methods.HttpPatch;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.util.Asserts;
 import org.apache.http.util.EntityUtils;
 import org.apache.http.util.TextUtils;
@@ -42,6 +51,7 @@ import org.kohsuke.stapler.QueryParameter;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import javax.management.RuntimeErrorException;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
@@ -49,13 +59,12 @@ import java.lang.reflect.Method;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 
 public class NotifyRecorder extends Recorder
@@ -64,12 +73,17 @@ public class NotifyRecorder extends Recorder
     private static final int        CONNECT_REQUEST_TIMEOUT = 10000;
     private static final int        SOCKET_TIMEOUT          = 10000;
     private static final String     JSON_FUNCTION           = loadResource( "/json.groovy" );
-    private static final String     DEFAULT_TEMPLATE        = loadResource( "/default-template.json"  );
+    private static final String     VICTOR_TEMPLATE        = loadResource( "/victor-template.json"  );
+    private static final String     STATUS_TEMPLATE        = loadResource( "/status-template.json"  );
     private static final String     LINE                    = "\n---------------\n";
 
-    @Nullable public  final     String        notifyUrl;
-    @Nullable public  final     String        notifyOn;
-    @Nonnull  public  final     String        notifyTemplate;
+    @Nullable public  final     String        notifyUrlVictor;
+    @Nullable public  final     String        notifyOnVictor;
+    @Nonnull  public  final     String        notifyTemplateVictor;
+    @Nullable public  final     String        notifyUrlStatus;
+    @Nullable public  final     String        notifyOnStatus;
+    @Nonnull  public  final     String        notifyTemplateStatus;
+    @Nonnull  public  final     String        notifyAuthorizationStatus;
     @Nonnull  private transient BuildListener listener;
 
     private CloseableHttpClient buildHttpClient () {
@@ -101,10 +115,15 @@ public class NotifyRecorder extends Recorder
 
     @SuppressWarnings({ "ParameterHidesMemberVariable", "SuppressionAnnotation" })
     @DataBoundConstructor
-    public NotifyRecorder ( String notifyUrl, String notifyOn, String notifyTemplate ) {
-        this.notifyUrl      = TextUtils.isBlank( notifyUrl ) ? null : notifyUrl.trim();
-        this.notifyOn       = TextUtils.isBlank( notifyOn ) ? Result.SUCCESS.toString() : notifyOn.trim();
-        this.notifyTemplate = ( TextUtils.isBlank( notifyTemplate ) ? DEFAULT_TEMPLATE : notifyTemplate ).trim();
+    public NotifyRecorder ( String notifyUrlVictor, String notifyOnVictor, String notifyTemplateVictor,
+    	String notifyUrlStatus, String notifyOnStatus, String notifyTemplateStatus, String notifyAuthorizationStatus ) {
+        this.notifyUrlVictor      = TextUtils.isBlank( notifyUrlVictor ) ? null : notifyUrlVictor.trim();
+        this.notifyOnVictor       = TextUtils.isBlank( notifyOnVictor ) ? Result.SUCCESS.toString() : notifyOnVictor.trim();
+        this.notifyTemplateVictor = ( TextUtils.isBlank( notifyTemplateVictor ) ? VICTOR_TEMPLATE : notifyTemplateVictor ).trim();
+        this.notifyUrlStatus      = TextUtils.isBlank( notifyUrlStatus ) ? null : notifyUrlStatus.trim();
+        this.notifyOnStatus       = TextUtils.isBlank( notifyOnStatus ) ? Result.SUCCESS.toString() : notifyOnStatus.trim();
+        this.notifyTemplateStatus = ( TextUtils.isBlank( notifyTemplateStatus ) ? VICTOR_TEMPLATE : notifyTemplateStatus ).trim();
+        this.notifyAuthorizationStatus = ( TextUtils.isBlank( notifyAuthorizationStatus ) ? null : notifyAuthorizationStatus ).trim();
     }
 
 
@@ -123,27 +142,81 @@ public class NotifyRecorder extends Recorder
         throws InterruptedException, IOException
     {
         this.listener              = notNull( listener, "Build listener" );
-        boolean isIntermediateStep = build.getUrl().contains( "$" );
-        boolean isNotifyableResult    = build.getResult().isBetterOrEqualTo( Result.fromString(notifyOn) );
 
-        if ( isIntermediateStep || TextUtils.isBlank ( notifyUrl ) ) {
-            listener.getLogger().println( String.format( "Skipping notify JSON as configured url is empty"));
-            return true;
+        listener.getLogger().println();
+        notifyVictor(build);
+        listener.getLogger().println();
+        notifyStatus(build);
+        return true;
+    }
+    
+    private void notifyVictor(AbstractBuild<?, ?> build) throws InterruptedException, IOException{
+    	boolean isIntermediateStep = build.getUrl().contains( "$" );
+        boolean isNotifyableResult    = build.getResult().isBetterOrEqualTo( Result.fromString(notifyOnVictor) );
+    	if ( isIntermediateStep || TextUtils.isBlank ( notifyUrlVictor ) ) {
+            listener.getLogger().println( String.format( "Skipping VictorOps notification as configured url is empty"));
+            return;
         }
         if ( ! isNotifyableResult ) {
-            listener.getLogger().println( String.format( "Skipping notify JSON as build result level is configured to %s", notifyOn));
-            return true;
+            listener.getLogger().println( String.format( "Skipping VictorOps notification as build result level is configured to %s", notifyOnVictor));
+            return;
         }
 
-        listener.getLogger().println( String.format( "Building notify JSON payload as build result level %s is matching notification level %s", build.getResult(), notifyOn ));
-        String notifyJson = buildNotifyJson( build, build.getEnvironment( listener ));
+        String jsonPayload = transformPayload( build, build.getEnvironment( listener ), notifyTemplateVictor);
+        validateJson(jsonPayload);
 
-        listener.getLogger().println( String.format( "Publishing notify JSON payload to %s", notifyUrl ));
-        listener.getLogger().println( String.format( "Using payload %s", notifyJson ));
+        listener.getLogger().println( String.format( "Notifying VictorOps as build result level %s is matching notification level %s", build.getResult(), notifyOnVictor ));
+        listener.getLogger().println( String.format( "Using URL %s", notifyUrlVictor ));
+        listener.getLogger().println( String.format( "Using payload %s", jsonPayload ));
         
+        HttpPost request = new HttpPost();
+        request.setURI(URI.create(notBlank(notifyUrlVictor, "Notify URL")));
+		request.setEntity(new StringEntity(notBlank(jsonPayload, "Notify JSON"),
+				ContentType.create("application/json", Consts.UTF_8)));
+		
         // noinspection ConstantConditions
-        sendNotifyRequest( notifyUrl, notifyJson );
-        return true;
+        sendNotifyRequestWithRetry(request);
+        
+        listener.getLogger().println( String.format( "Notification of victorOps was SUCCESSFUL" ));
+    }
+    
+    private void notifyStatus(AbstractBuild<?, ?> build) throws InterruptedException, IOException{
+    	boolean isIntermediateStep = build.getUrl().contains( "$" );
+        boolean isNotifyableResult    = build.getResult().isBetterOrEqualTo( Result.fromString(notifyOnStatus) );
+    	if ( isIntermediateStep || TextUtils.isBlank ( notifyUrlStatus ) ) {
+            listener.getLogger().println( String.format( "Skipping Statuspage notification as configured url is empty"));
+            return;
+        }
+        if ( ! isNotifyableResult ) {
+            listener.getLogger().println( String.format( "Skipping Statuspage notification as build result level is configured to %s", notifyOnStatus));
+            return;
+        }
+
+        String notifyPayload = transformPayload( build, build.getEnvironment( listener ), notifyTemplateStatus);
+
+        String[] formData=notifyPayload.split("=");
+        if(formData.length!=2){
+        	throw new RuntimeException( String.format( "Payload is not a valid form parameter in syntax 'a=b', was %s", notifyPayload));
+        }
+        
+        listener.getLogger().println( String.format( "Notifying Statuspage as build result level %s is matching notification level %s", build.getResult(), notifyOnStatus ));
+        listener.getLogger().println( String.format( "Using URL %s", notifyUrlStatus ));
+        listener.getLogger().println( String.format( "Using payload %s", notifyPayload ));
+        
+        HttpPatch request=new HttpPatch();
+        if(notifyAuthorizationStatus!=null&&!notifyAuthorizationStatus.isEmpty())
+        {
+        	listener.getLogger().println("Using Authorization header");
+        	request.setHeader("Authorization", notifyAuthorizationStatus);
+        }
+		request.setURI(URI.create(notBlank(notifyUrlStatus, "Notify URL")));
+		UrlEncodedFormEntity entity = new UrlEncodedFormEntity(Arrays.asList(new BasicNameValuePair(formData[0],formData[1])));
+		request.setEntity(entity);
+		
+        // noinspection ConstantConditions
+        sendNotifyRequestWithRetry(request);
+        
+        listener.getLogger().println( String.format( "Notification of statuspage was SUCCESSFUL" ));
     }
 
     /**
@@ -193,8 +266,8 @@ public class NotifyRecorder extends Recorder
         return true;
     }
     
-    private String buildNotifyJson( @Nonnull final AbstractBuild build,
-                                    @Nonnull final Map<String,?> env )
+    private String transformPayload( @Nonnull final AbstractBuild build,
+                                    @Nonnull final Map<String,?> env, String rawTemplate)
     {
         Map<String,?> binding = new HashMap<String, Object>(){{
            put( "jenkins", notNull( Jenkins.getInstance(), "Jenkins instance" ));
@@ -205,40 +278,67 @@ public class NotifyRecorder extends Recorder
 
         String json     = null;
         String template = "<%\n\n" + JSON_FUNCTION + "\n\n%>\n\n" +
-                          notBlank( notifyTemplate, "Notify template" );
+                          notBlank( rawTemplate, "Notify template" );
 
         try
         {
             json = notBlank( new SimpleTemplateEngine( getClass().getClassLoader()).
                              createTemplate( template ).
                              make( binding ).toString(), "Payload JSON" ).trim();
-
-            Asserts.check(( json.startsWith( "{" ) && json.endsWith( "}" )) ||
-                          ( json.startsWith( "[" ) && json.endsWith( "]" )),
-                          "Illegal JSON content: should start and end with {} or []" );
-
-            Asserts.notNull( new JsonSlurper().parseText( json ), "Parsed JSON" );
         }
         catch ( Exception e )
         {
-            throwError(( json == null ?
+            throw new RuntimeException((
                 String.format( "Failed to parse Groovy template:%s%s%s",
-                               LINE, template, LINE ) :
-                String.format( "Failed to validate JSON payload (check with http://jsonlint.com/):%s%s%s",
-                               LINE, json, LINE )), e );
+                               LINE, template, LINE )));
         }
-
         return json;
     }
+    
+    private void validateJson(String json){
+        try
+        {
+        	Asserts.check(( json.startsWith( "{" ) && json.endsWith( "}" )) ||
+                ( json.startsWith( "[" ) && json.endsWith( "]" )),"JSON payload does not start with { or [");
 
+            Asserts.notNull( new JsonSlurper().parseText( json ), "Parsed JSON" );
+	    }
+	    catch ( Exception e )
+	    {
+	        throw new RuntimeException(
+	            String.format( "Failed to validate JSON payload (check with http://jsonlint.com/):%s%s%s",
+	                           LINE, json, LINE ), e );
+	    }
+    }
 
-	private void sendNotifyRequest(@Nonnull String url, @Nonnull String json)
+    private void sendNotifyRequestWithRetry(HttpEntityEnclosingRequestBase request)
+			throws IOException {
+		Exception lastException=null;
+		int i=0;
+		do{
+			try {
+				sendNotifyRequest(request);
+				lastException=null;
+			} catch (Exception e) {
+				lastException=e;
+				i++;
+				listener.getLogger().println(String.format(
+						"%s. try: Failed to publish notify request", i));
+			}
+		}
+		while(lastException!=null && i<5);
+		
+		if(lastException!=null){
+			throw new RuntimeException(
+					String.format(
+							"Retries exhausted, failed to publish notify request"), lastException);
+		}
+	}
+
+	private void sendNotifyRequest(HttpEntityEnclosingRequestBase request)
 			throws IOException {
 		CloseableHttpClient httpclient = buildHttpClient();
 		try {
-			HttpPost request = new HttpPost(notBlank(url, "Notify URL"));
-			request.setEntity(new StringEntity(notBlank(json, "Notify JSON"),
-					ContentType.create("application/json", Consts.UTF_8)));
 			CloseableHttpResponse response = httpclient.execute(request);
 			try {
 				int statusCode = response.getStatusLine().getStatusCode();
@@ -249,22 +349,10 @@ public class NotifyRecorder extends Recorder
 			} finally {
 				response.close();
 			}
-		} catch (Exception e) {
-			throwError(
-					String.format(
-							"Failed to publish notify request to '%s', payload JSON was:%s%s%s",
-							notifyUrl, LINE, json, LINE), e);
 		} finally {
 			httpclient.close();
 		}
 	}
-
-
-    private void throwError( String message, Exception e ) {
-        listener.error( "%s: %s", message, e );
-        throw new RuntimeException( message, e );
-    }
-
 
     @Extension
     public static class DescriptorImpl extends BuildStepDescriptor<Publisher>
@@ -277,7 +365,7 @@ public class NotifyRecorder extends Recorder
         @Override
         public String getDisplayName ()
         {
-            return "Publish HTTP POST notification";
+            return "Publish Notifications to VictorOps and StatusPage";
         }
 
         @Override
@@ -286,12 +374,25 @@ public class NotifyRecorder extends Recorder
             return true;
         }
 
-        public String getDefaultNotifyTemplate()
+        public String getVictorNotifyTemplate()
         {
-            return DEFAULT_TEMPLATE;
+            return VICTOR_TEMPLATE;
+        }
+        
+        public String getStatusNotifyTemplate()
+        {
+            return STATUS_TEMPLATE;
         }
 
-        public FormValidation doCheckNotifyUrl( @QueryParameter String notifyUrl ) {
+        public FormValidation doCheckNotifyUrlVictor( @QueryParameter String notifyUrlVictor ) {
+        	return doCheckNotifyUrlInternal(notifyUrlVictor);
+        }
+        
+        public FormValidation doCheckNotifyUrlStatus( @QueryParameter String notifyUrlStatus ) {
+        	return doCheckNotifyUrlInternal(notifyUrlStatus);
+        }
+        
+        private FormValidation doCheckNotifyUrlInternal( String notifyUrl ) {
 
             if ( TextUtils.isBlank( notifyUrl )) {
                 return FormValidation.ok();
@@ -318,15 +419,35 @@ public class NotifyRecorder extends Recorder
         }
 
 
-        public FormValidation doCheckNotifyTemplate( @QueryParameter String notifyTemplate ) {
+        public FormValidation doCheckNotifyTemplateVictor( @QueryParameter String notifyTemplateVictor ) {
             return FormValidation.ok();
         }
         
-        public FormValidation doCheckNotifyOn( @QueryParameter String notifyOn ) {
+        public FormValidation doCheckNotifyOnVictor( @QueryParameter String notifyOnVictor ) {
             return FormValidation.ok();
         }
         
-        public ListBoxModel doFillNotifyOnItems() {
+        public FormValidation doCheckNotifyTemplateStatus( @QueryParameter String notifyTemplateStatus ) {
+            return FormValidation.ok();
+        }
+        
+        public FormValidation doCheckNotifyOnStatus( @QueryParameter String notifyOnStatus ) {
+            return FormValidation.ok();
+        }
+        
+        public FormValidation doCheckNotifyAuthorizationStatus( @QueryParameter String notifyAuthorizationStatus ) {
+            return FormValidation.ok();
+        }
+        
+        public ListBoxModel doFillNotifyOnVictorItems() {
+            return doFillNotifyOnInternalItems();
+        }
+        
+        public ListBoxModel doFillNotifyOnStatusItems() {
+            return doFillNotifyOnInternalItems();
+        }
+        
+        private ListBoxModel doFillNotifyOnInternalItems() {
             ListBoxModel items = new ListBoxModel();
             items.add(createOption(Result.SUCCESS));
             items.add(createOption(Result.UNSTABLE));

@@ -1,0 +1,27 @@
+{
+  "message_type"       : "${
+    (
+      build.previousBuild!=null && !build.previousBuild.result.equals(hudson.model.Result.SUCCESS) && build.result.equals(hudson.model.Result.SUCCESS)
+    )
+    ? "RECOVERY" :
+    (
+      (
+        (
+          build.previousBuild!=null && !build.previousBuild.result.equals(hudson.model.Result.SUCCESS) && !build.result.equals(hudson.model.Result.SUCCESS)
+        )
+        ? "CRITICAL" :
+        (
+          (
+            !build.result.equals(hudson.model.Result.SUCCESS)
+          )
+          ? "WARNING" :
+          "INFO"
+        )
+      )
+    )
+  }",
+  "entity_id"          : "${(build.parent.displayName).replace(" ","_")}",
+  "entity_display_name": "${build.parent.displayName}",
+  "state_message"      : "Plan '${build.parent.displayName}-${build.number}' ended with status ${build.result}.${build.result.equals(hudson.model.Result.SUCCESS)?"":" \\nPossible reasons are: "+ reasons.collect{reason -> "\\n - "+reason.name + " - " + reason.description}}",
+  "monitoring_tool"    : "jenkins"
+}
