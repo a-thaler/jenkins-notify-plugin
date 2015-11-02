@@ -1,0 +1,25 @@
+<j:jelly xmlns:j="jelly:core"
+         xmlns:st="jelly:stapler"
+         xmlns:d="jelly:define"
+         xmlns:l="/lib/layout"
+         xmlns:t="/lib/hudson"
+         xmlns:f="/lib/form">
+
+  <f:entry title        = "HTTP POST Notification URL"
+         field        = "notifyUrl"
+         description  = "URL to POST Notification to">
+    <f:textbox default="https://[yourDomain]"/>
+  </f:entry>
+
+  <f:entry title        = "Notify On"
+         field        = "notifyOn"
+         description  = "Down to which build result level the notification should be triggered?">
+    <f:select default="FAILURE"/>
+  </f:entry>
+
+  <f:entry title        = "Notification Template"
+         field        = "notifyTemplate"
+         description  = "JSON payload to send">
+    <f:textarea default = "${descriptor.notifyTemplate}"/>
+  </f:entry>
+</j:jelly>

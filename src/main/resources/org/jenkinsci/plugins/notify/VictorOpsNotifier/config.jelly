@@ -1,0 +1,25 @@
+<j:jelly xmlns:j="jelly:core"
+         xmlns:st="jelly:stapler"
+         xmlns:d="jelly:define"
+         xmlns:l="/lib/layout"
+         xmlns:t="/lib/hudson"
+         xmlns:f="/lib/form">
+
+  <f:entry title        = "VictorOps Notification URL"
+         field        = "notifyUrl"
+         description  = "URL to POST VictorOps Notification to">
+    <f:textbox default="https://alert.victorops.com/integrations/generic/[key1]/alert/[key2]/[team]"/>
+  </f:entry>
+
+  <f:entry title        = "VictorOps Notify On"
+         field        = "notifyOn"
+         description  = "Down to which build result level the notification to VictorOps should be triggered?">
+    <f:select default="FAILURE"/>
+  </f:entry>
+
+  <f:entry title        = "VictorOps Notification Template"
+         field        = "notifyTemplate"
+         description  = "JSON payload to send to VictorOps">
+    <f:textarea default = "${descriptor.notifyTemplate}"/>
+  </f:entry>
+</j:jelly>

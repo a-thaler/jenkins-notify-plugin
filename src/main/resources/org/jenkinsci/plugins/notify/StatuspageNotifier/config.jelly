@@ -1,0 +1,31 @@
+<j:jelly xmlns:j="jelly:core"
+         xmlns:st="jelly:stapler"
+         xmlns:d="jelly:define"
+         xmlns:l="/lib/layout"
+         xmlns:t="/lib/hudson"
+         xmlns:f="/lib/form">
+
+  <f:entry title        = "Statuspage Notification URL"
+         field        = "notifyUrl"
+         description  = "URL to PATCH Statuspage Notification to">
+    <f:textbox default="https://api.statuspage.io/v1/pages/[key]/components/[component].json"/>
+  </f:entry>
+
+  <f:entry title        = "Statuspage Notify On"
+         field        = "notifyOn"
+         description  = "Down to which build result level the notification to Statuspage should be triggered?">
+    <f:select default="FAILURE"/>
+  </f:entry>
+
+  <f:entry title        = "Statuspage Authorization Token"
+         field        = "notifyAuthorization"
+         description  = "The header value to use for the 'Authorization' header when notifying statuspage">
+    <f:textbox default="OAuth [token]"/>
+  </f:entry>
+
+  <f:entry title        = "Statuspage Notification Template"
+         field        = "notifyTemplate"
+         description  = "Form parameter payload to send to Statuspage">
+    <f:textarea default = "${descriptor.notifyTemplate}"/>
+  </f:entry>
+</j:jelly>
