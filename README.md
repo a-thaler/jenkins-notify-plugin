@@ -37,3 +37,13 @@ For example:
 
     mvn clean package -s settings.xml
     cp -f target/*.hpi ~/.jenkins/plugins
+
+### Pipeline
+
+To use the plugin in a pipeline, currently simple build steps are available. You can use it like that:
+
+    step([$class: 'VictorOpsNotifier', notifyUrl:'https://alert.victorops.com/integrations/generic/XXX/alert/XXX/XXX', notifyOn:'FAILURE', notifyTemplate:'XXX'])
+
+    step([$class: 'StatuspageNotifier', notifyUrl:'https://api.statuspage.io/v1/pages/XXX/components/XXX.json', notifyOn:'FAILURE', notifyTemplate:'XXX', notifyAuthorization:'OAuth XXX'])
+
+    step([$class: 'GenericNotifier', notifyUrl:'https://XXX', notifyOn:'FAILURE', notifyTemplate:'XXX'])
