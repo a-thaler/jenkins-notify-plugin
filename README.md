@@ -15,6 +15,8 @@ JSON payload is rendered as a [Groovy template](http://groovy.codehaus.org/Groov
 * **`jenkins`** - instance of [`jenkins.model.Jenkins`](http://javadoc.jenkins-ci.org/jenkins/model/Jenkins.html)
 * **`build`** - instance of [`hudson.model.AbstractBuild`](http://javadoc.jenkins-ci.org/hudson/model/AbstractBuild.html)
 * **`env`** - instance of [`hudson.EnvVars`](http://javadoc.jenkins-ci.org/hudson/EnvVars.html) corresponding to the current build process
+* **`reasons`** - Collection of [`com.sonyericsson.jenkins.plugins.bfa.FoundFailureCause`] containing possible Failure Causes collected by 'Build Failure Analyzer' plugin
+* **`helper`** - instance of [`org.jenkinsci.plugins.notify.Helper`]
 
 Here's a [RequestBin](http://requestb.in/) of submitting a default payload:
 

@@ -149,6 +149,7 @@ public abstract class AbstractNotifier extends Recorder{
            put( "build",   notNull( build, "Build instance" ));
            put( "env",     notNull( env, "Build environment" ));
            put( "reasons", notNull( buildPossibleFailureCauses(build), "Possible Failure Causes collected by 'Build Failure Analyzer' plugin" ));
+           put( "helper",  notNull( new Helper(build), "Helper for build status"));
         }};
 
         String json     = null;
