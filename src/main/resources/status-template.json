@@ -1,14 +1,3 @@
 component[status]=${
-    (
-      !build.previousBuild.result.equals(hudson.model.Result.SUCCESS) && build.result.equals(hudson.model.Result.SUCCESS)
-    )
-    ? "operational" :
-    (
-      (
-        (
-          !build.previousBuild.result.equals(hudson.model.Result.SUCCESS) && !build.result.equals(hudson.model.Result.SUCCESS)
-        )
-        ? "major_outage" : "operational"
-      )
-    )
+helper.isRecovering()? "operational" :(helper.isLastThreeFailed()? "major_outage" : "operational")
 }

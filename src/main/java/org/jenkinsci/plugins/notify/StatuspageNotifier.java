@@ -1,3 +1,4 @@
+
 package org.jenkinsci.plugins.notify;
 
 import static org.apache.http.util.Args.notBlank;
@@ -23,7 +24,6 @@ import hudson.util.ReflectionUtils;
 import hudson.util.ListBoxModel;
 import hudson.util.ListBoxModel.Option;
 import jenkins.model.Jenkins;
-
 import org.apache.commons.httpclient.NameValuePair;
 import org.apache.commons.httpclient.methods.multipart.MultipartRequestEntity;
 import org.apache.commons.httpclient.methods.multipart.Part;
@@ -110,11 +110,11 @@ public class StatuspageNotifier extends AbstractNotifier
         if(formData.length!=2){
         	throw new RuntimeException( String.format( "Payload is not a valid form parameter in syntax 'a=b', was %s", notifyPayload));
         }
-        
+
         listener.getLogger().println( String.format( "Notifying Statuspage as build result level %s is matching notification level %s", build.getResult(), notifyOn ));
         listener.getLogger().println( String.format( "Using URL %s", notifyUrl ));
         listener.getLogger().println( String.format( "Using payload %s", notifyPayload ));
-        
+
         HttpPatch request=new HttpPatch();
         if(notifyAuthorization!=null&&!notifyAuthorization.isEmpty())
         {
@@ -124,10 +124,10 @@ public class StatuspageNotifier extends AbstractNotifier
 		request.setURI(URI.create(notBlank(notifyUrl, "Notify URL")));
 		UrlEncodedFormEntity entity = new UrlEncodedFormEntity(Arrays.asList(new BasicNameValuePair(formData[0],formData[1])));
 		request.setEntity(entity);
-		
+
         // noinspection ConstantConditions
         sendNotifyRequestWithRetry(request);
-        
+
         listener.getLogger().println( String.format( "Notification of statuspage was SUCCESSFUL" ));
     }
 
@@ -135,7 +135,7 @@ public class StatuspageNotifier extends AbstractNotifier
     public static class DescriptorImpl extends BuildStepDescriptor<Publisher>
     {
     	private String notifyOn;
-    	
+
     	public DescriptorImpl() {
 			load();
 		}
@@ -184,15 +184,15 @@ public class StatuspageNotifier extends AbstractNotifier
         public FormValidation doCheckNotifyTemplate( @QueryParameter String notifyTemplate ) {
             return FormValidation.ok();
         }
-        
+
         public FormValidation doCheckNotifyOn( @QueryParameter String notifyOn ) {
             return FormValidation.ok();
         }
-        
+
         public FormValidation doCheckNotifyAuthorization( @QueryParameter String notifyAuthorization ) {
             return FormValidation.ok();
         }
-        
+
         public ListBoxModel doFillNotifyOnItems() {
             ListBoxModel items = new ListBoxModel();
             items.add(createOption(Result.SUCCESS));
@@ -202,7 +202,7 @@ public class StatuspageNotifier extends AbstractNotifier
             items.add(createOption(Result.ABORTED));
             return items;
         }
-        
+
         private Option createOption(Result result){
             return new Option(result.toString(), result.toString(), notifyOn!=null && notifyOn.equals(result.toString()));
         }
